@@ -6,3 +6,5 @@
 !main.go
 !*.go
 !*.md
+!*.jpg
+!testdata
