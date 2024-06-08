@@ -1,2 +1,8 @@
-google-cloud-sdk
-.env
+*.*
+.*
+*
+!go.mod
+!go.sum
+!main.go
+!*.go
+!*.md
