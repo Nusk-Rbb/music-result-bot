@@ -14,7 +14,7 @@ Discordのスラッシュコマンドを使ってリザルト画像からOCRを�
 
 Contributors names and contact info
 
-ex. @Nusk-Rbb
+ex. [@Nusk-Rbb](https://github.com/Nusk-Rbb) - nuskrbb1741dn@gmail.com
 
 ## Acknowledgments
 
