@@ -1,28 +1,28 @@
 package main
 
 import (
-	"encoding/csv"
 	"flag"
 	"fmt"
 	"log"
 	"os"
 	"os/signal"
 
-	vision "cloud.google.com/go/vision/apiv1"
 	"github.com/bwmarrin/discordgo"
 	"github.com/joho/godotenv"
-	"golang.org/x/net/context"
 )
 
 // Bot parameters
 var (
+	OutputRootPath = "outputs"
 	RemoveCommands = flag.Bool("rmcmd", true, "Remove all commands after shutdowning or not")
 )
 
 var s *discordgo.Session
 
-func init() { flag.Parse() }
-func init() { envLoad() }
+func init() {
+	flag.Parse()
+	envLoad()
+}
 
 func init() {
 	var err error
@@ -43,8 +43,16 @@ var (
 			Description: "Basic command",
 		},
 		{
-			Name:        "ocr",
+			Name:        "upload-result",
 			Description: "Read Game Result Image with OCR",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionAttachment,
+					Name:        "upload-result-image",
+					Description: "Attachment Result Image File",
+					Required:    true,
+				},
+			},
 		},
 	}
 
@@ -57,15 +65,38 @@ var (
 				},
 			})
 		},
-		"ocr": func(s *discordgo.Session, i *discordgo.InteractionCreate) {
-			imagepath := "testdata/sdvx_result.jpg"
-			outputpath := "output.csv"
-			err := detectTextAndSaveToFile(outputpath, imagepath)
+		"upload-result": func(s *discordgo.Session, i *discordgo.InteractionCreate) {
+			options := i.ApplicationCommandData().Options
+
+			optionMap := make(map[string]*discordgo.ApplicationCommandInteractionDataOption, len(options))
+			for _, opt := range options {
+				optionMap[opt.Name] = opt
+			}
+
+			margs := make([]interface{}, 0, len(options))
+			msgformat := "コマンドが正常に動作しました\n"
+
+			if opt, ok := optionMap["upload-result-image"]; ok {
+				margs = append(margs, opt.Name)
+				msgformat += "> コマンド名: %s\n"
+			}
+
+			attachmentID := i.ApplicationCommandData().Options[0].Value.(string)
+			attachmentUrl := i.ApplicationCommandData().Resolved.Attachments[attachmentID].URL
+			outputpath := OutputRootPath + "/" + attachmentID + ".csv"
+
+			err := detectTextAndSaveToFile(outputpath, attachmentUrl)
 			if err != nil {
 				log.Fatalf("Failed to read result image: %v", err)
 			}
 			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 				Type: discordgo.InteractionResponseChannelMessageWithSource,
+				Data: &discordgo.InteractionResponseData{
+					Content: fmt.Sprintf(
+						msgformat,
+						margs...,
+					),
+				},
 			})
 		},
 	}
@@ -84,81 +115,6 @@ func envLoad() {
 	if err != nil {
 		log.Fatalf("Error loading env target")
 	}
-}
-
-// detectText gets text from the Vision API for an image at the given file path.
-func detectTextAndSaveToFile(outputFile string, imagepath string) error {
-	ctx := context.Background()
-
-	client, err := vision.NewImageAnnotatorClient(ctx)
-	if err != nil {
-		return err
-	}
-
-	file, err := os.Open(imagepath)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-
-	image, err := vision.NewImageFromReader(file)
-	if err != nil {
-		return err
-	}
-	annotations, err := client.DetectTexts(ctx, image, nil, 10)
-	if err != nil {
-		return err
-	}
-
-	if len(annotations) == 0 {
-		log.Fatalf("No text found in image: %s", imagepath)
-	}
-
-	// Create a CSV writer
-	csvFile, err := os.Create(outputFile)
-	if err != nil {
-		return err
-	}
-	defer csvFile.Close()
-
-	csvWriter := csv.NewWriter(csvFile)
-	err = csvWriter.Write([]string{"Text", "X", "Y"}) // Write header row
-	if err != nil {
-		return err
-	}
-
-	isFirstLine := true
-	for _, annotation := range annotations {
-		// Extract text and bounding polygon
-		text := annotation.Description
-		vertices := annotation.BoundingPoly.Vertices
-
-		// Calculate and format x,y coordinates
-		var xCoord, yCoord int32
-		for _, vertex := range vertices {
-			if vertex.X > xCoord {
-				xCoord = vertex.X
-			}
-			if vertex.Y > yCoord {
-				yCoord = vertex.Y
-			}
-		}
-
-		// Append text with coordinates to the buffer
-		if !isFirstLine {
-			err = csvWriter.Write([]string{text, fmt.Sprintf("%d", xCoord), fmt.Sprintf("%d", yCoord)})
-			if err != nil {
-				return err
-			}
-		}
-		isFirstLine = false
-	}
-
-	csvWriter.Flush() // Ensure all data is written
-
-	log.Printf("Text from image %s successfully saved to %s\n", imagepath, outputFile)
-
-	return nil
 }
 
 func main() {
@@ -180,7 +136,6 @@ func main() {
 		}
 		registeredCommands[i] = cmd
 	}
-
 	defer s.Close()
 
 	stop := make(chan os.Signal, 1)
